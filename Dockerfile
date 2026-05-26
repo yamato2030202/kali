@@ -30,7 +30,7 @@ RUN mkdir -p /usr/share/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. إنشاء المستخدم وصلاحيات الـ Sudo بالباسورد المعتمد
-RUN useradd -m -s /bin/bash railwayuser && echo "railwayuser:railway123" | chpasswd \
+RUN useradd -m -s /bin/bash railwayuser && echo "railwayuser:123456" | chpasswd \
     && usermod -aG sudo railwayuser
 
 # 4. بناء ملفات الجلسة وتصاريح تشغيل Openbox لتفادي الشاشة السوداء نهائياً
