@@ -1,9 +1,10 @@
-FROM kalilinux/kali-rolling:latest
+FROM docker.io/kalilinux/kali-rolling:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. تحديث وتثبيت أدوات الواجهة الخفيفة والاعتماديات الأساسية
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 1. تهيئة مستودعات Kali الرسمية الأساسية وتحديث النظام (لتفادي خطأ 404)
+RUN echo "deb http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware" > /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
     xfce4 \
     xfce4-goodies \
     xrdp \
@@ -14,9 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     ca-certificates \
     gnupg \
-    && apt-get clean
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. تثبيت Tailscale يدوياً (عبر الـ Package Manager لتجنب مشكلة systemd)
+# 2. تثبيت Tailscale يدويًا من مستودعاتهم الرسمية لتجنب استخدام سكربت التثبيت التلقائي المعطوب
 RUN mkdir -p /usr/share/keyrings \
     && curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
     && curl -fsSL https://pkgs.tailscale.com/stable/debian/bullseye.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list \
@@ -25,18 +27,14 @@ RUN mkdir -p /usr/share/keyrings \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. إعداد مستخدم الـ RDP الخفيف
+# 3. إنشاء مستخدم الـ RDP وصلاحيات الـ Sudo
 RUN useradd -m -s /bin/bash kaliuser && echo "kaliuser:kali123" | chpasswd \
     && usermod -aG sudo kaliuser
 
-# 4. إجبار التوزيعة على استخدام واجهة xfce النظيفة
+# 4. ضبط النظام ليقوم بتشغيل واجهة XFCE عند الاتصال بـ RDP
 RUN echo "startxfce4" > /home/kaliuser/.xsession && chown kaliuser:kaliuser /home/kaliuser/.xsession
 
 EXPOSE 3389
 
-# 5. تشغيل خادم الـ Tailscale يدوياً في الخلفية (userspace-networking ليتوافق مع الحاويات) ثم الـ RDP
-CMD tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 & \
-    sleep 3 && \
-    tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname=kali-railway & \
-    service xrdp start && \
-    tail -f /dev/null
+# 5. تشغيل الـ daemon الخاص بـ Tailscale بدون نظام عزل الشبكة الافتراضي (userspace) ليعمل داخل الحاوية بنجاح
+CMD ["/bin/sh", "-c", "tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 & sleep 3 && tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname=kali-railway & service xrdp start && tail -f /dev/null"]
