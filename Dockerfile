@@ -1,15 +1,15 @@
 FROM docker.io/ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV USER=railwayuser
 
-# 1. تحديث النظام وتثبيت الواجهة الخفيفة والخوادم المطلوبة بدقة
+# 1. تحديث النظام وتثبيت بيئة واجهة مستخدم متكاملة عبر الويب (Xfce + noVNC)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openbox \
-    xrdp \
-    xorg \
-    tightvncserver \
-    dbus-x11 \
+    xfce4 \
+    xfce4-goodies \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
     sudo \
     curl \
     iptables \
@@ -29,32 +29,30 @@ RUN mkdir -p /usr/share/keyrings \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. إنشاء المستخدم وصلاحيات الـ Sudo بالباسورد المعتمد
-RUN useradd -m -s /bin/bash railwayuser && echo "railwayuser:123456" | chpasswd \
+# 3. إنشاء المستخدم وصلاحيات الـ Sudo
+RUN useradd -m -s /bin/bash railwayuser && echo "railwayuser:railway123" | chpasswd \
     && usermod -aG sudo railwayuser
 
-# 4. بناء ملفات الجلسة وتصاريح تشغيل Openbox لتفادي الشاشة السوداء نهائياً
-RUN mkdir -p /home/railwayuser/.vnc \
-    && echo "#!/bin/sh\nexport XKL_XMODMAP_DISABLE=1\nexec openbox-session &" > /home/railwayuser/.vnc/xstartup \
-    && chmod +x /home/railwayuser/.vnc/xstartup \
-    && echo "openbox-session" > /home/railwayuser/.xsession \
-    && chmod +x /home/railwayuser/.xsession \
-    && chown -R railwayuser:railwayuser /home/railwayuser
+# 4. تجهيز منافذ البث (noVNC يعمل على منفذ 6080)
+EXPOSE 6080
 
-# ضبط إعدادات الـ RDP لتسريع النقل إلى أقصى حد وتخفيف الاستهلاك
-RUN sed -i 's/max_bpp=32/max_bpp=16/g' /etc/xrdp/xrdp.ini \
-    && echo "allow_channels=true" >> /etc/xrdp/xrdp.ini
-
-EXPOSE 3389
-
-# 5. سكربت التشغيل الذي يضمن إقلاع الـ VNC المحتجب أولاً ثم الـ RDP فوقه والـ Tailscale
+# 5. سكربت التشغيل الذكي لإقلاع الشاشة الافتراضية وبثها فوراً عبر الويب وتفعيل Tailscale
 RUN echo '#!/bin/sh\n\
 tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 &\n\
 sleep 2\n\
-tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname=ubuntu-rdp\n\
-USER=railwayuser vncserver :1 -geometry 1280x720 -depth 16 &\n\
+tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname=ubuntu-desktop\n\
+# إنشاء شاشة عرض وهمية مستقرة\n\
+Xvfb :1 -screen 0 1280x720x16 &\n\
+export DISPLAY=:1\n\
 sleep 2\n\
-service xrdp start\n\
+# تشغيل الواجهة الرسومية خفيفة الوزن\n\
+startxfce4 &\n\
+sleep 2\n\
+# تشغيل خادم البث الداخلي بدون باسورد\n\
+x11vnc -display :1 -nopw -forever -listen localhost &\n\
+sleep 2\n\
+# تحويل البث إلى صفحة ويب HTML5 على منفذ 6080\n\
+websockify --web /usr/share/novnc/ 6080 localhost:5900 &\n\
 tail -f /dev/null' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 CMD ["/bin/sh", "/entrypoint.sh"]
